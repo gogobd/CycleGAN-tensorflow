@@ -5,12 +5,20 @@ from glob import glob
 import tensorflow as tf
 import numpy as np
 from collections import namedtuple
+import curses
+import sys
 
 from module import *
 from utils import *
 
 
+stdscr = curses.initscr()
+curses.noecho()
+stdscr.nodelay(1) # set getch() non-blocking
+
+
 class cyclegan(object):
+
     def __init__(self, sess, args):
         self.sess = sess
         self.batch_size = args.batch_size
@@ -133,9 +141,9 @@ class cyclegan(object):
         start_time = time.time()
 
         if args.continue_train and self.load(args.checkpoint_dir):
-            print(" [*] Load SUCCESS")
+            print(" [*] Checkpoint Load SUCCESS")
         else:
-            print(" [!] Load failed...")
+            print(" [!] Checkpoint Load failed...")
 
         for epoch in range(args.epoch):
             dataA = glob('./datasets/{}/*.*'.format(self.dataset_dir + '/trainA'))
@@ -168,22 +176,42 @@ class cyclegan(object):
                 self.writer.add_summary(summary_str, counter)
 
                 counter += 1
-                print(("Epoch: [%2d] [%4d/%4d] time: %4.4f" % (
-                    epoch, idx, batch_idxs, time.time() - start_time)))
+                print(("Epoch: [%2d] [%4d/%4d] time: %4.4f counter: %4d" % (
+                    epoch, idx, batch_idxs, time.time() - start_time, counter)))
 
-                if np.mod(counter, args.print_freq) == 1:
-                    self.sample_model(args.sample_dir, epoch, idx)
-
-                if np.mod(counter, args.save_freq) == 2:
+                c = stdscr.getch()
+                if c == ord('s'):
+                    print("Save: save checkpoint")
                     self.save(args.checkpoint_dir, counter)
+                elif c == ord('t'):
+                    print("Test: sample_model")
+                    self.sample_model(args, epoch, idx)
+                elif c == ord('p'):
+                    print("Pause! Press [ENTER]")
+                    stdscr.getstr(0, 0, 1)
+                    stdscr.clear()
+                elif c == ord('q'):
+                    print("QUIT!")
+                    sys.exit()
+                elif np.mod(counter, args.print_freq) == args.print_freq - 2:
+                    print("sample_model")
+                    self.sample_model(args, epoch, idx)
+                elif np.mod(counter, args.save_freq) == args.save_freq - 1:
+                    print("save checkpoint")
+                    self.save(args.checkpoint_dir, counter)
+                elif c != -1:
+                    print("(s)ave (t)est (p)ause (q)uit")
 
     def save(self, checkpoint_dir, step):
+        print(" [*] Writing checkpoint...")
         model_name = "cyclegan.model"
         model_dir = "%s_%s" % (self.dataset_dir, self.image_size)
         checkpoint_dir = os.path.join(checkpoint_dir, model_dir)
 
         if not os.path.exists(checkpoint_dir):
             os.makedirs(checkpoint_dir)
+
+        print("> dir: " + checkpoint_dir)
 
         self.saver.save(self.sess,
                         os.path.join(checkpoint_dir, model_name),
@@ -195,6 +223,8 @@ class cyclegan(object):
         model_dir = "%s_%s" % (self.dataset_dir, self.image_size)
         checkpoint_dir = os.path.join(checkpoint_dir, model_dir)
 
+        print("> dir: " + checkpoint_dir)
+
         ckpt = tf.train.get_checkpoint_state(checkpoint_dir)
         if ckpt and ckpt.model_checkpoint_path:
             ckpt_name = os.path.basename(ckpt.model_checkpoint_path)
@@ -203,13 +233,13 @@ class cyclegan(object):
         else:
             return False
 
-    def sample_model(self, sample_dir, epoch, idx):
+    def sample_model(self, args, epoch, idx):
         dataA = glob('./datasets/{}/*.*'.format(self.dataset_dir + '/testA'))
         dataB = glob('./datasets/{}/*.*'.format(self.dataset_dir + '/testB'))
         np.random.shuffle(dataA)
         np.random.shuffle(dataB)
         batch_files = list(zip(dataA[:self.batch_size], dataB[:self.batch_size]))
-        sample_images = [load_train_data(batch_file, is_testing=True) for batch_file in batch_files]
+        sample_images = [load_train_data(batch_file, args.load_size, args.fine_size, is_testing=True) for batch_file in batch_files]
         sample_images = np.array(sample_images).astype(np.float32)
 
         fake_A, fake_B = self.sess.run(
@@ -217,25 +247,39 @@ class cyclegan(object):
             feed_dict={self.real_data: sample_images}
         )
         save_images(fake_A, [self.batch_size, 1],
-                    './{}/A_{:02d}_{:04d}.jpg'.format(sample_dir, epoch, idx))
+                    './{}/A_{:04d}_{:06d}.jpg'.format(args.sample_dir, epoch, idx))
         save_images(fake_B, [self.batch_size, 1],
-                    './{}/B_{:02d}_{:04d}.jpg'.format(sample_dir, epoch, idx))
+                    './{}/B_{:04d}_{:06d}.jpg'.format(args.sample_dir, epoch, idx))
 
     def test(self, args):
         """Test cyclegan"""
         init_op = tf.global_variables_initializer()
         self.sess.run(init_op)
         if args.which_direction == 'AtoB':
-            sample_files = glob('./datasets/{}/*.*'.format(self.dataset_dir + '/testA'))
+            sample_files = glob(os.path.join(
+                '.',
+                'datasets',
+                self.dataset_dir,
+                'testA',
+                '*.*'
+                )
+            )
         elif args.which_direction == 'BtoA':
-            sample_files = glob('./datasets/{}/*.*'.format(self.dataset_dir + '/testB'))
+            sample_files = glob(os.path.join(
+                '.',
+                'datasets',
+                self.dataset_dir,
+                'testB',
+                '*.*'
+                )
+            )
         else:
             raise Exception('--which_direction must be AtoB or BtoA')
 
         if self.load(args.checkpoint_dir):
-            print(" [*] Load SUCCESS")
+            print(" [*] Checkpoint Load SUCCESS")
         else:
-            print(" [!] Load failed...")
+            print(" [!] Checkpoint Load failed...")
 
         # write html for visual comparison
         index_path = os.path.join(args.test_dir, '{0}_index.html'.format(args.which_direction))
@@ -260,4 +304,5 @@ class cyclegan(object):
             index.write("<td><img src='%s'></td>" % (image_path if os.path.isabs(image_path) else (
                 '..' + os.path.sep + image_path)))
             index.write("</tr>")
+
         index.close()
