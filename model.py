@@ -145,7 +145,7 @@ class cyclegan(object):
         else:
             print(" [!] Checkpoint Load failed...")
 
-        for epoch in range(args.epoch):
+        for epoch in range(args.continue_train, args.epoch):
             dataA = glob('./datasets/{}/*.*'.format(self.dataset_dir + '/trainA'))
             dataB = glob('./datasets/{}/*.*'.format(self.dataset_dir + '/trainB'))
             np.random.shuffle(dataA)
