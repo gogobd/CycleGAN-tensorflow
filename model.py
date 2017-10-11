@@ -180,10 +180,10 @@ class cyclegan(object):
                     epoch, idx, batch_idxs, time.time() - start_time, counter)))
 
                 c = stdscr.getch()
-                if c == ord('s'):
+                if c == ord('s') or np.mod(counter, args.save_freq) == args.save_freq - 1:
                     print("Save: save checkpoint")
                     self.save(args.checkpoint_dir, counter)
-                elif c == ord('t'):
+                elif c == ord('t') or np.mod(counter, args.print_freq) == args.print_freq - 2:
                     print("Test: sample_model")
                     self.sample_model(args, epoch, idx)
                 elif c == ord('p'):
@@ -193,12 +193,6 @@ class cyclegan(object):
                 elif c == ord('q'):
                     print("QUIT!")
                     sys.exit()
-                elif np.mod(counter, args.print_freq) == args.print_freq - 2:
-                    print("sample_model")
-                    self.sample_model(args, epoch, idx)
-                elif np.mod(counter, args.save_freq) == args.save_freq - 1:
-                    print("save checkpoint")
-                    self.save(args.checkpoint_dir, counter)
                 elif c != -1:
                     print("(s)ave (t)est (p)ause (q)uit")
 
