@@ -145,13 +145,31 @@ class cyclegan(object):
         else:
             print(" [!] Checkpoint Load failed...")
 
-        for epoch in range(args.continue_train, args.epoch):
-            dataA = glob('./datasets/{}/*.*'.format(self.dataset_dir + '/trainA'))
-            dataB = glob('./datasets/{}/*.*'.format(self.dataset_dir + '/trainB'))
+        start_epoch = 0
+        if args.continue_train >= 0:
+            start_epoch = args.continue_train
+        # elif args.continue_train < 0:
+        #     start_epoch = tf.get_variable("epoch", shape=[0])
+
+        old_time = time.time()
+        new_epoch_time = old_epoch_time = time.time()
+        for epoch in range(start_epoch, args.epoch):
+            dataA = glob(
+                './datasets/{}/*.*'.format(
+                    self.dataset_dir + '/trainA'
+                    )
+                )
+            dataB = glob(
+                './datasets/{}/*.*'.format(
+                    self.dataset_dir + '/trainB'
+                    )
+                )
             np.random.shuffle(dataA)
             np.random.shuffle(dataB)
             batch_idxs = min(min(len(dataA), len(dataB)), args.train_size) // self.batch_size
             lr = args.lr if epoch < args.epoch_step else args.lr*(args.epoch-epoch)/(args.epoch-args.epoch_step)
+
+            print("Epoch: [%2d] START. lr: %1.8f" % (epoch, lr,))
 
             for idx in range(0, batch_idxs):
                 batch_files = list(zip(dataA[idx * self.batch_size:(idx + 1) * self.batch_size],
@@ -176,8 +194,11 @@ class cyclegan(object):
                 self.writer.add_summary(summary_str, counter)
 
                 counter += 1
-                print(("Epoch: [%2d] [%4d/%4d] time: %4.4f counter: %4d" % (
-                    epoch, idx, batch_idxs, time.time() - start_time, counter)))
+                new_time = time.time()
+                print(("Epoch: [%2d] [%4d/%4d] counter: %4d time: %4.4f " % (
+                    epoch, idx, batch_idxs, counter, new_time-old_time,)))
+
+                old_time = new_time
 
                 c = stdscr.getch()
                 if c == ord('s') or np.mod(counter, args.save_freq) == args.save_freq - 1:
@@ -195,6 +216,11 @@ class cyclegan(object):
                     sys.exit()
                 elif c != -1:
                     print("(s)ave (t)est (p)ause (q)uit")
+
+            new_epoch_time = time.time()
+            print("Epoch: [%2d] DONE. lr: %1.8f time: %4.4f" % (
+                epoch, lr, new_epoch_time - old_epoch_time,))
+            old_epoch_time = new_epoch_time
 
     def save(self, checkpoint_dir, step):
         print(" [*] Writing checkpoint...")
