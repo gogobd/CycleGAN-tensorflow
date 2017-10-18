@@ -13,17 +13,17 @@ from module import mae_criterion
 from module import abs_criterion
 from module import generator_unet
 from module import sce_criterion
-from utils import load_train_data
 from utils import load_test_data
 from utils import ImagePool
 from utils import save_images
+from utils import ImageMemMap
+import random
 
 
 class cyclegan(object):
 
     def __init__(self, sess, args):
         self.sess = sess
-        self.batch_size = args.batch_size
         self.image_size = args.fine_size
         self.input_c_dim = args.input_nc
         self.output_c_dim = args.output_nc
@@ -41,9 +41,9 @@ class cyclegan(object):
         else:
             self.criterionGAN = sce_criterion
 
-        OPTIONS = namedtuple('OPTIONS', 'batch_size image_size \
+        OPTIONS = namedtuple('OPTIONS', 'image_size \
                               gf_dim df_dim output_c_dim is_training')
-        self.options = OPTIONS._make((args.batch_size, args.fine_size,
+        self.options = OPTIONS._make((args.fine_size,
                                       args.ngf, args.ndf, args.output_nc,
                                       args.phase == 'train'))
 
@@ -159,24 +159,50 @@ class cyclegan(object):
         # elif args.continue_train < 0:
         #     start_epoch = tf.get_variable("epoch", shape=[0])
 
+        # Prepare images for fast loading
+        image_mem_map_A = ImageMemMap(
+            os.path.join(self.dataset_dir, 'trainA.npy'),
+            os.path.join(self.dataset_dir, 'trainA', '*'),
+            load_size=args.load_size,
+            fine_size=args.fine_size,
+        )
+        image_mem_map_B = ImageMemMap(
+            os.path.join(self.dataset_dir, 'trainB.npy'),
+            os.path.join(self.dataset_dir, 'trainB', '*'),
+            load_size=args.load_size,
+            fine_size=args.fine_size,
+        )
+
+        minsize = min(
+            min(
+                len(image_mem_map_A),
+                len(image_mem_map_B)
+            ),
+            args.train_size
+        )
+
         old_time = time.time()
         new_epoch_time = old_epoch_time = time.time()
         for epoch in range(start_epoch, args.epoch):
-            dataA = glob(os.path.join(self.dataset_dir, 'trainA', '*'))
-            dataB = glob(os.path.join(self.dataset_dir, 'trainB', '*'))
 
-            np.random.shuffle(dataA)
-            np.random.shuffle(dataB)
+            batch_idxs_A = list(range(len(image_mem_map_A)))
+            batch_idxs_B = list(range(len(image_mem_map_B)))
 
-            batch_idxs = min(min(len(dataA), len(dataB)), args.train_size) // self.batch_size
-            lr = args.lr if epoch < args.epoch_step else args.lr*(args.epoch-epoch)/(args.epoch-args.epoch_step)
+            random.shuffle(batch_idxs_A)
+            random.shuffle(batch_idxs_B)
 
-            print("Epoch: [%2d] START. lr: %1.8f" % (epoch, lr,))
+            if epoch < args.epoch_step:
+                lr = args.lr
+            else:
+                lr = args.lr * (args.epoch - epoch) / (args.epoch - args.epoch_step)
 
-            for idx in range(0, batch_idxs):
-                batch_files = list(zip(dataA[idx * self.batch_size:(idx + 1) * self.batch_size],
-                                       dataB[idx * self.batch_size:(idx + 1) * self.batch_size]))
-                batch_images = [load_train_data(batch_file, args.load_size, args.fine_size) for batch_file in batch_files]
+            print("Starting Epoch [%2d] lr: %1.8f" % (epoch, lr,))
+
+            for idx in range(minsize):
+
+                img_A = image_mem_map_A.get_image(batch_idxs_A[idx])
+                img_B = image_mem_map_B.get_image(batch_idxs_B[idx])
+                batch_images = [np.concatenate((img_A, img_B), axis=2)]
                 batch_images = np.array(batch_images).astype(np.float32)
 
                 # Update G network and record fake outputs
@@ -198,7 +224,7 @@ class cyclegan(object):
                 counter += 1
                 new_time = time.time()
                 print(("Epoch: [%2d] [%4d/%4d] counter: %4d time: %4.4f " % (
-                    epoch, idx, batch_idxs, counter, new_time-old_time,)))
+                    epoch, idx, minsize, counter, new_time-old_time,)))
 
                 old_time = new_time
 
@@ -219,6 +245,7 @@ class cyclegan(object):
                 elif c != -1:
                     print("(s)ave (t)est (p)ause (q)uit")
 
+            del batch_images
             new_epoch_time = time.time()
             print("Epoch: [%2d] DONE. lr: %1.8f time: %4.4f" % (
                 epoch, lr, new_epoch_time - old_epoch_time,))
@@ -264,35 +291,26 @@ class cyclegan(object):
         np.random.shuffle(dataA)
         np.random.shuffle(dataB)
 
-        batch_files = list(
-            zip(
-                dataA[:self.batch_size],
-                dataB[:self.batch_size],
-            )
-        )
+        batch_files = [dataA[0], dataB[0]]
 
         sample_images = []
         for batch_file in batch_files:
-            sample_image = load_train_data(
+            sample_image = load_test_data(
                 batch_file,
-                args.load_size,
                 args.fine_size,
-                is_testing=True
             )
             sample_images.append(sample_image)
 
-        # sample_images = [load_train_data(batch_file, args.load_size, args.fine_size, is_testing=True) for
-        #     batch_file in batch_files]
-
+        sample_images = [np.concatenate((sample_images[0], sample_images[1]), axis=2)]
         sample_images = np.array(sample_images).astype(np.float32)
 
         fake_A, fake_B = self.sess.run(
             [self.fake_A, self.fake_B],
             feed_dict={self.real_data: sample_images}
         )
-        save_images(fake_A, [self.batch_size, 1],
+        save_images(fake_A, [1, 1],
                     './{}/A_{:04d}_{:06d}.jpg'.format(args.sample_dir, epoch, idx))
-        save_images(fake_B, [self.batch_size, 1],
+        save_images(fake_B, [1, 1],
                     './{}/B_{:04d}_{:06d}.jpg'.format(args.sample_dir, epoch, idx))
 
     def test(self, args):

@@ -7,17 +7,13 @@ import pprint
 import scipy.misc
 import numpy as np
 import copy
+import glob
+import os.path
+import time
+
 
 pp = pprint.PrettyPrinter()
-
-# get_stddev = lambda x, k_h, k_w: 1/math.sqrt(k_w*k_h*x.get_shape()[-1])
-
-
-def get_stddev(x, k_h, k_w):
-    return 1/math.sqrt(k_w*k_h*x.get_shape()[-1])
-
-# -----------------------------
-# new added functions for cyclegan
+IMAGE_CACHE = {}
 
 
 class ImagePool(object):
@@ -46,76 +42,141 @@ class ImagePool(object):
             return image
 
 
+class ImageMemMap(object):
+
+    def __init__(
+        self,
+        filename,
+        filepattern,
+        load_size=286,
+        fine_size=256,
+    ):
+        self.filename = filename
+        self.filepattern = filepattern
+        self.filenames = glob.glob(self.filepattern)
+        self.length = len(self.filenames)
+        self.load_size = load_size
+        self.fine_size = fine_size
+        self.shape = (self.length, fine_size, fine_size, 3)
+
+        if os.path.exists(self.filename):
+            print("Loading memmap %s" % repr(self.filename))
+            self.fp = np.memmap(
+                self.filename,
+                dtype='float32',
+                mode='r',
+                shape=self.shape,
+            )
+        else:
+            self.prepare_train_data(self.filepattern)
+
+    def __len__(self):
+        return self.length
+
+    def get_image(self, index):
+        img_X = self.fp[index]
+        if np.random.rand() > 0.5:
+            img_X = np.fliplr(img_X)
+        return img_X
+
+    def prepare_train_data(
+        self,
+        images_pattern,
+        flush_after=20,
+    ):
+        if os.path.exists(self.filename):
+            print(
+                "WARNING: Won't overwrite dataset %s, delete it manually."
+                % self.filename
+            )
+            return
+        image_names = glob.glob(images_pattern)
+        fp = np.memmap(
+            self.filename,
+            dtype='float32',
+            mode='w+',
+            shape=self.shape,
+        )
+
+        time_start = time_end = time.time()
+        for i, image_name in enumerate(image_names):
+            img = self.get_reshaped_image(
+                image_name, self.load_size, self.fine_size)
+            fp[i] = img
+            if i % flush_after == flush_after - 1:
+                fp.flush()
+            time_end = time.time()
+            print(
+                "[%d/%d] %2.4fs %s" % (
+                    i,
+                    len(image_names),
+                    time_end - time_start,
+                    repr(image_name)
+                )
+            )
+            time_start = time_end
+        fp.flush()
+        del fp
+
+        self.fp = np.memmap(
+            self.filename,
+            dtype='float32',
+            mode='r',
+            shape=self.shape,
+        )
+
+        return self.fp
+
+    def imread(self, path, is_grayscale=False):
+        return scipy.misc.imread(path, mode='RGB').astype(np.float)
+
+    def reshape_image(
+        self,
+        img_X,
+        load_size,
+        fine_size,
+    ):
+        if load_size != fine_size:
+            img_X = scipy.misc.imresize(img_X, [load_size, load_size])
+            h1 = int(np.ceil(np.random.uniform(1e-2, load_size-fine_size)))
+            w1 = int(np.ceil(np.random.uniform(1e-2, load_size-fine_size)))
+            img_X = img_X[h1:h1+fine_size, w1:w1+fine_size]
+
+        return img_X
+
+    def get_reshaped_image(self, image_path, load_size, fine_size):
+        img_X = self.imread(image_path)
+        img_X = self.reshape_image(img_X, load_size, fine_size)
+        img_X = (img_X / 127.5) - 1.0
+        return img_X
+
+
+# def load_train_data(
+#     image_path,
+#     load_size=286,
+#     fine_size=256,
+# ):
+
+#     img_X = scipy.misc.imread(image_path[0], mode='RGB').astype(np.float)
+#     img_X = scipy.misc.imresize(img_X, [fine_size, fine_size])
+#     img_X = (img_X / 127.5) - 1.0
+
+#     return img_X
+
+
+def get_stddev(x, k_h, k_w):
+    return 1/math.sqrt(k_w*k_h*x.get_shape()[-1])
+
+
 def load_test_data(image_path, fine_size=256):
-    img = imread(image_path)
+    img = scipy.misc.imread(image_path, mode='RGB').astype(np.float)
     img = scipy.misc.imresize(img, [fine_size, fine_size])
     img = (img / 127.5) - 1.0
     return img
 
 
-def load_train_data(
-    image_path,
-    load_size=286,
-    fine_size=256,
-    is_testing=False,
-):
-
-    img_A = imread(image_path[0])
-    img_B = imread(image_path[1])
-
-    if not is_testing:
-        if load_size != fine_size:
-            img_A = scipy.misc.imresize(img_A, [load_size, load_size])
-            img_B = scipy.misc.imresize(img_B, [load_size, load_size])
-            h1 = int(np.ceil(np.random.uniform(1e-2, load_size-fine_size)))
-            w1 = int(np.ceil(np.random.uniform(1e-2, load_size-fine_size)))
-            img_A = img_A[h1:h1+fine_size, w1:w1+fine_size]
-            img_B = img_B[h1:h1+fine_size, w1:w1+fine_size]
-
-        if np.random.random() > 0.5:
-            img_A = np.fliplr(img_A)
-            img_B = np.fliplr(img_B)
-
-    else:
-        img_A = scipy.misc.imresize(img_A, [fine_size, fine_size])
-        img_B = scipy.misc.imresize(img_B, [fine_size, fine_size])
-
-    img_A = (img_A / 127.5) - 1.0
-    img_B = (img_B / 127.5) - 1.0
-
-    img_AB = np.concatenate((img_A, img_B), axis=2)
-    # img_AB shape: (fine_size, fine_size, input_c_dim + output_c_dim)
-    return img_AB
-
-# -----------------------------
-
-
-def get_image(
-    image_path,
-    image_size,
-    is_crop=True,
-    resize_w=64,
-    is_grayscale=False
-):
-    return transform(
-        imread(
-            image_path,
-            is_grayscale),
-        image_size,
-        is_crop,
-        resize_w,
-    )
-
-
 def save_images(images, size, image_path):
     return imsave(inverse_transform(images), size, image_path)
-
-
-def imread(path, is_grayscale=False):
-    if (is_grayscale):
-        return scipy.misc.imread(path, flatten=True).astype(np.float)
-    else:
-        return scipy.misc.imread(path, mode='RGB').astype(np.float)
 
 
 def merge_images(images, size):
