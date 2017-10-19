@@ -204,6 +204,7 @@ class cyclegan(object):
                 img_B = image_mem_map_B.get_image(batch_idxs_B[idx])
                 batch_images = [np.concatenate((img_A, img_B), axis=2)]
                 batch_images = np.array(batch_images).astype(np.float32)
+                # (1, 512, 512, 6)
 
                 # Update G network and record fake outputs
                 fake_A, fake_B, _, summary_str = self.sess.run(
