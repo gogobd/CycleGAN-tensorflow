@@ -147,6 +147,7 @@ class cyclegan(object):
         self.writer = tf.summary.FileWriter("./logs", self.sess.graph)
 
         counter = 0
+        do_quit = False
 
         if args.continue_train and self.load(args.checkpoint_dir):
             print(" [*] Checkpoint Load SUCCESS")
@@ -224,8 +225,8 @@ class cyclegan(object):
 
                 counter += 1
                 new_time = time.time()
-                print(("Epoch: [%2d] [%4d/%4d] counter: %4d time: %4.4f " % (
-                    epoch, idx, minsize, counter, new_time-old_time,)))
+                print(("Epoch: [%2d] [%4d/%4d] counter: %4d time: %4.4f %s" % (
+                    epoch, idx, minsize, counter, new_time-old_time, (do_quit and 'Q') or '')))
 
                 old_time = new_time
 
@@ -233,6 +234,9 @@ class cyclegan(object):
                 if c == ord('s') or np.mod(counter, args.save_freq) == args.save_freq - 1:
                     print("Save: save checkpoint")
                     self.save(args.checkpoint_dir, counter)
+                    if do_quit:
+                        print("Quitting")
+                        sys.exit()
                 elif c == ord('t') or np.mod(counter, args.print_freq) == args.print_freq - 2:
                     print("Test: sample_model")
                     self.sample_model(args, epoch, idx)
@@ -240,15 +244,23 @@ class cyclegan(object):
                     print("Pause! Press [ENTER]")
                     self.stdscr.getstr(0, 0, 1)
                     self.stdscr.clear()
-                elif c == ord('q'):
+                elif c == ord('Q'):
                     print("QUIT!")
                     sys.exit()
+                elif c == ord("q"):
+                    if do_quit:
+                        do_quit = False
+                        print("Quit after next checkpoint is disabled.")
+                    else:
+                        print("Quit after next checkpoint")
+                        do_quit = True
                 elif c != -1:
-                    print("(s)ave (t)est (p)ause (q)uit")
+                    print("(s)ave (t)est (p)ause (Q)uit")
 
             del batch_images
             new_epoch_time = time.time()
             print("Epoch: [%2d] DONE. lr: %1.8f time: %4.4f" % (
+
                 epoch, lr, new_epoch_time - old_epoch_time,))
             old_epoch_time = new_epoch_time
 

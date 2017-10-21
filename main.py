@@ -21,7 +21,7 @@ parser.add_argument('--epoch', dest='epoch', type=int,
 parser.add_argument('--epoch_step', dest='epoch_step',
                     type=int, default=100, help='# of epoch to decay lr')
 parser.add_argument('--train_size', dest='train_size',
-                    type=int, default=1e8, help='# images used to train')
+                    type=int, default=1500, help='# images used to train')
 parser.add_argument('--load_size', dest='load_size', type=int,
                     default=512, help='scale images to this size')
 parser.add_argument('--fine_size', dest='fine_size', type=int,
